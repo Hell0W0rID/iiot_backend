@@ -1,0 +1,50 @@
+modules = ["go", "postgresql-16", "go-1.22", "go-1.21", "go-1.23", "golang", "golang-1.23"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["git", "jq", "openssh"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Server"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Command Service Test"
+
+[[workflows.workflow]]
+name = "Server"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd services/core/command && go run edgex_main.go"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Command Service Test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd services/core/command && go run *.go"
+waitForPort = 5000
+
+[deployment]
+run = ["sh", "-c", "cd services/core/command && go run edgex_main.go"]
+
+[[ports]]
+localPort = 5000
+externalPort = 5000
+
+[[ports]]
+localPort = 8000
+externalPort = 80

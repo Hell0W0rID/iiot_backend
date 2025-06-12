@@ -1,0 +1,231 @@
+version: '3.8'
+
+networks:
+  iiot-network:
+    driver: bridge
+
+services:
+  # Infrastructure Services
+  postgres:
+    image: postgres:15-alpine
+    container_name: iiot-postgres
+    environment:
+      POSTGRES_DB: iiot_backend
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - iiot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iiot_backend"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: iiot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - iiot-network
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  consul:
+    image: consul:1.16
+    container_name: iiot-consul
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    environment:
+      CONSUL_BIND_INTERFACE: eth0
+      CONSUL_CLIENT_INTERFACE: eth0
+    networks:
+      - iiot-network
+    command: consul agent -dev -client=0.0.0.0 -ui
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: iiot-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+    networks:
+      - iiot-network
+    restart: unless-stopped
+
+  # Core IIoT Backend Services
+  iiot-metadata:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: iiot-metadata
+    ports:
+      - "8001:8000"
+    environment:
+      - SERVICE_NAME=metadata
+      - PORT=8000
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+      - PGDATABASE=iiot_backend
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REGISTRY_HOST=consul
+      - REGISTRY_PORT=8500
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - LOG_LEVEL=info
+      - JWT_SECRET=iiot-backend-secret-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    networks:
+      - iiot-network
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  iiot-data:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: iiot-data
+    ports:
+      - "8002:8000"
+    environment:
+      - SERVICE_NAME=data
+      - PORT=8000
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+      - PGDATABASE=iiot_backend
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REGISTRY_HOST=consul
+      - REGISTRY_PORT=8500
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - LOG_LEVEL=info
+      - JWT_SECRET=iiot-backend-secret-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    networks:
+      - iiot-network
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  iiot-command:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: iiot-command
+    ports:
+      - "8003:8000"
+    environment:
+      - SERVICE_NAME=command
+      - PORT=8000
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+      - PGDATABASE=iiot_backend
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REGISTRY_HOST=consul
+      - REGISTRY_PORT=8500
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - LOG_LEVEL=info
+      - JWT_SECRET=iiot-backend-secret-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+    networks:
+      - iiot-network
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  iiot-gateway:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: iiot-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=gateway
+      - PORT=8000
+      - PGHOST=postgres
+      - PGPORT=5432
+      - PGUSER=postgres
+      - PGPASSWORD=postgres
+      - PGDATABASE=iiot_backend
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REGISTRY_HOST=consul
+      - REGISTRY_PORT=8500
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=1883
+      - METADATA_SERVICE_URL=http://iiot-metadata:8000
+      - DATA_SERVICE_URL=http://iiot-data:8000
+      - COMMAND_SERVICE_URL=http://iiot-command:8000
+      - LOG_LEVEL=info
+      - JWT_SECRET=iiot-backend-secret-key
+    depends_on:
+      - iiot-metadata
+      - iiot-data
+      - iiot-command
+    networks:
+      - iiot-network
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_logs:
